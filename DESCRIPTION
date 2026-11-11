@@ -1,0 +1,38 @@
+Package: grates
+Title: Grouped Date Classes
+Version: 1.8.2
+Authors@R:
+    c(
+      person(
+        given = "Tim",
+        family = "Taylor",
+        role = c("aut", "cre"),
+        email = "tim.taylor@hiddenelephants.co.uk",
+        comment = c(ORCID = "0000-0002-8587-7113")
+      )
+    )
+Description: Provides a coherent interface and implementation for creating
+    grouped date classes.
+URL: https://www.reconverse.org/grates/, https://github.com/reconverse/grates
+BugReports: https://github.com/reconverse/grates/issues
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+Depends:
+    R (>= 3.6.0)
+Suggests:
+    ggplot2,
+    scales,
+    vctrs,
+    rlang,
+    litedown,
+    outbreaks,
+    testthat (>= 3.0.0)
+VignetteBuilder: litedown
+Config/testthat/load-all: list(export_all = FALSE, helpers = FALSE)
+Config/testthat/edition: 3
+Config/testthat/start-first: plots, refactoring
+Imports: 
+    utils,
+    fastymd (>= 0.2.0)
+Config/roxygen2/version: 8.1.1

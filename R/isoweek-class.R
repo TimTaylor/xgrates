@@ -1,0 +1,471 @@
+# -------------------------------------------------------------------------
+#' ISO Week class
+#'
+# -------------------------------------------------------------------------
+#' @description
+#'
+#' `<grates_isoweek>` objects are used to represent ISO week dates as defined in
+#' [ISO 8601](https://en.wikipedia.org/wiki/ISO_8601). To expand further, it is
+#' easiest to quote from the related
+#' [wikipedia entry](https://en.wikipedia.org/w/index.php?title=ISO_week_date&oldid=1269568343):
+#'
+#' *"ISO weeks start with Monday and end on Sunday. Each week's year is the
+#' Gregorian year in which the Thursday falls. The first week of the year, hence,
+#' always contains 4 January. ISO week year numbering therefore usually
+#' deviates by 1 from the Gregorian for some days close to 1 January."*
+#'
+#' Internally, `<grates_isoweek>` objects are stored as the number of weeks
+#' (starting at 0) from the first Monday prior to the Unix Epoch (1970-01-01).
+#' That is, the number of seven day periods from 1969-12-29.
+#'
+# -------------------------------------------------------------------------
+#' @details
+#'
+#' `isoweek()` is a constructor for `<grates_isoweek>` objects. It takes a
+#' vector of year and vector of week values as inputs. Length 1 inputs will be
+#' recycled to the length of the other input and `double` vectors will be
+#' converted to integer via `as.integer(floor(x))`.
+#'
+#' `as_isoweek()` is a generic for conversion to `<grates_isoweek>`.
+#' - Date, POSIXct, and POSIXlt are converted with the timezone respected.
+#' - Character objects are first coerced to date via `as.Date()` unless
+#' `format = "yearweek"` in which case input is assumed to be in the form
+#' "YYYY-Wxx" and parsed accordingly.
+#'
+#' `new_isoweek()` is a minimal constructor for `<grates_isoweek>` objects
+#' aimed at developers. It takes, as input, the number of isoweeks since the
+#' Monday prior to the Unix Epoch that you wish to represent. `double` vectors
+#' will be converted to integer via `as.integer(floor(x))`.
+#'
+# -------------------------------------------------------------------------
+#' @param x,xx
+#'
+#' \R objects.
+#'
+#' @param year `[integer]`
+#'
+#' Vector representing the year associated with `week`.
+#'
+#' `double` vectors will be converted via `as.integer(floor(x))`.
+#'
+#' @param week `[integer]`
+#'
+#' Vector representing the week associated with `year.
+#'
+#' `double` vectors will be converted via `as.integer(floor(x))`.
+#'
+#' @param format `[character]`
+#'
+#' Passed to as.Date() unless `format = "yearweek"` in which case input is
+#' assumed to be in the form "YYYY-Wxx".
+#'
+#' If not specified, it will try tryFormats one by one on the first non-NA
+#' element, and give an error if none works. Otherwise, the processing is via
+#' `strptime()` whose help page describes available conversion specifications.
+#'
+#' @param tryFormats `[character]`
+#'
+#' Format strings to try if format is not specified.
+#'
+#' @param ...
+#'
+#' Other values passed to as.Date().
+#'
+# -------------------------------------------------------------------------
+#' @return
+#' A `<grates_isoweek>` object.
+#'
+# -------------------------------------------------------------------------
+#' @seealso
+#' The [yearweek][yearweek_class] and [epiweek][epiweek_class] classes.
+#'
+# -------------------------------------------------------------------------
+#' @references
+#' Wikipedia contributors. (2025, January 15). ISO week date.
+#' In Wikipedia, The Free Encyclopedia.
+#' Retrieved 09:19, March 6, 2025, from
+#' https://en.wikipedia.org/w/index.php?title=ISO_week_date&oldid=1269568343
+#'
+# -------------------------------------------------------------------------
+#' @examples
+#'
+#' # date coercion
+#' as_isoweek(Sys.Date())
+#'
+#' # POSIXt coercion
+#' as_isoweek(as.POSIXct("2019-03-04 01:01:01", tz = "America/New_York"))
+#'
+#' # character coercion assumes date input by default
+#' as_isoweek("2019-05-03")
+#'
+#' # character coercion can handle YYYY-Wxx format too
+#' as_isoweek("2019-W12", format = "yearweek")
+#'
+#' # construction
+#' isoweek(year = 2000, week = 3)
+#'
+#' # direct construction
+#' stopifnot(
+#'     identical(
+#'         new_isoweek(0:1),
+#'         as_isoweek("1969-12-29") + 0:1
+#'     )
+#' )
+#'
+# -------------------------------------------------------------------------
+#' @name isoweek_class
+NULL
+
+# -------------------------------------------------------------------------
+#' @rdname isoweek_class
+#' @export
+isoweek <- function(year = integer(), week = integer()) {
+
+    year <- .make_floored_integer(year)
+    week <- .make_floored_integer(week)
+
+    # check compatible lengths
+    tmp <- .recycle(year, week)
+    year <- tmp[[1L]]
+    week <- tmp[[2L]]
+
+    .isoweek(year = year, week = week)
+}
+
+# -------------------------------------------------------------------------
+#' @rdname isoweek_class
+#' @export
+as_isoweek <- function(x, ...) {
+    UseMethod("as_isoweek")
+}
+
+# -------------------------------------------------------------------------
+#' @rdname isoweek_class
+#' @export
+as_isoweek.default <- function(x, ...) {
+    stopf("Not implemented for class [%s].", toString(class(x)))
+}
+
+# -------------------------------------------------------------------------
+#' @rdname isoweek_class
+#' @export
+as_isoweek.Date <- function(x, ...) {
+    .Call(C_as_grouped_week_from_date, x, "grates_isoweek", 1L)
+}
+
+# -------------------------------------------------------------------------
+#' @rdname isoweek_class
+#' @export
+as_isoweek.POSIXt <- function(x, ...) {
+    x <- .as_date(x)
+    as_isoweek.Date(x)
+}
+
+# -------------------------------------------------------------------------
+#' @rdname isoweek_class
+#' @export
+as_isoweek.character <- function(
+    x,
+    format,
+    tryFormats = c("%Y-%m-%d", "%Y/%m/%d"),
+    ...
+) {
+    if (!missing(format)) {
+        if (length(format) > 1L)
+            stop("If specified, `format` must be of length 1.")
+
+        if (format == "yearweek") {
+            years <- sub("^([0-9]{4}).*", "\\1", x, perl = TRUE)
+            years <- suppressWarnings(as.integer(years))
+            weeks <- sub(".*-[wW]([0-9]{1,2}$)", "\\1", x, perl = TRUE)
+            weeks <- suppressWarnings(as.integer(weeks))
+            out <- isoweek(year = years, week = weeks)
+            return(out)
+        }
+    }
+    out <- as.Date(x, format = format, tryFormats = tryFormats, ...)
+    as_isoweek.Date(out)
+}
+
+# -------------------------------------------------------------------------
+#' @rdname isoweek_class
+#' @export
+as_isoweek.factor <- function(
+    x,
+    format,
+    tryFormats = c("%Y-%m-%d", "%Y/%m/%d"),
+    ...
+) {
+    x <- as.character(x)
+    as_isoweek.character(x, format = format, tryFormats = tryFormats, ...)
+}
+
+# -------------------------------------------------------------------------
+#' @rdname isoweek_class
+#' @export
+new_isoweek <- function(x = integer()) {
+    x <- .make_floored_integer(x)
+    .new_isoweek(x)
+}
+
+
+# -------------------------------------------------------------------------
+#' @rdname isoweek_class
+#' @export
+is_isoweek <- function(xx) {
+    inherits(xx, "grates_isoweek")
+}
+
+# -------------------------------------------------------------------------
+#' @export
+format.grates_isoweek <- function(x, ...) {
+    format.grates_yearweek(x, ...)
+}
+
+# -------------------------------------------------------------------------
+#' @export
+print.grates_isoweek <- function(x, ...) {
+    print.grates_yearweek(x, ...)
+}
+
+# -------------------------------------------------------------------------
+#' @exportS3Method vctrs::vec_ptype_abbr
+vec_ptype_abbr.grates_isoweek <- function(x, ...) {"isowk"}
+
+#' @exportS3Method vctrs::vec_ptype_full
+vec_ptype_full.grates_isoweek <- function(x, ...) {"isoweek"}
+
+
+
+# -------------------------------------------------------------------------
+#' @export
+`[.grates_isoweek` <- function(x, ..., drop = FALSE) {
+    out <- NextMethod()
+    `class<-`(out, class(x))
+}
+
+# -------------------------------------------------------------------------
+#' @export
+`[[.grates_isoweek` <- function(x, ..., drop = TRUE) {
+    out <- NextMethod()
+    `class<-`(out, class(x))
+}
+
+# -------------------------------------------------------------------------
+#' @export
+`[<-.grates_isoweek` <- function(x, ..., value) {
+    if (!inherits(value, "grates_isoweek"))
+        stop("Can only assign a <grates_isoweek> object into a <grates_isoweek> object.")
+    out <- NextMethod()
+    `class<-`(out, class(x))
+}
+
+# -------------------------------------------------------------------------
+#' @export
+`[[<-.grates_isoweek` <- `[<-.grates_isoweek`
+
+# -------------------------------------------------------------------------
+#' @export
+rep.grates_isoweek <- function(x, ...) {
+    out <- NextMethod()
+    `class<-`(out, class(x))
+}
+
+# -------------------------------------------------------------------------
+#' @export
+unique.grates_isoweek <- function(x, incomparables = FALSE, ...) {
+    out <- NextMethod()
+    `class<-`(out, class(x))
+}
+
+# -------------------------------------------------------------------------
+#' @export
+c.grates_isoweek <- function(..., recursive = FALSE, use.names = TRUE) {
+    dots <- list(...)
+    if (!all(vapply(dots, inherits, TRUE, what = "grates_isoweek")))
+        stop("Unable to combine <grates_isoweek> objects with other classes.")
+    res <- NextMethod()
+    .new_isoweek(res)
+}
+
+# -------------------------------------------------------------------------
+#' @export
+seq.grates_isoweek <- function(from, to, by = 1L, ...) {
+
+    if (!inherits(to, "grates_isoweek") || length(to) != 1L)
+        stop("`to` must be a <grates_isoweek> object of length 1.")
+
+    if (!.is_scalar_whole(by))
+        stop("`by` must be an integer of length 1.")
+
+    from <- as.integer(from)
+    to <- as.integer(to)
+    out <- seq.int(from = from, to = to, by = by)
+
+    # Ensure integer as we cannot rely on seq.int (may return double)
+    out <- as.integer(out)
+    .new_isoweek(out)
+}
+
+# -------------------------------------------------------------------------
+#' @export
+as.integer.grates_isoweek <- function(x, ...) unclass(x)
+
+# -------------------------------------------------------------------------
+#' @export
+as.double.grates_isoweek <- function(x, ...) as.double(unclass(x))
+
+# -------------------------------------------------------------------------
+#' @export
+as.Date.grates_isoweek <- function(x, ...) {
+    .Call(C_as_date_from_isoweek, x)
+}
+
+# -------------------------------------------------------------------------
+#' @export
+as.POSIXct.grates_isoweek <- function(x, tz = "UTC", ...) {
+    if (tz != "UTC") {
+        stop(
+            "<grates_isoweek> objects can only be converted to UTC. ",
+            "If other timezones are required, first convert to <Date> and then proceed as desired."
+        )
+    }
+    x <- unclass(as.Date.grates_isoweek(x))
+    .POSIXct(x * 86400, tz = "UTC")
+}
+
+# -------------------------------------------------------------------------
+#' @export
+as.POSIXlt.grates_isoweek <- function(x, tz = "UTC", ...) {
+    if (tz != "UTC") {
+        stop(
+            "<grates_isoweek> objects can only be converted to UTC. ",
+            "If other timezones are required, first convert to <Date> and then proceed as desired."
+        )
+    }
+    x <- unclass(as.Date.grates_isoweek(x))
+    as.POSIXlt(.POSIXct(x * 86400, tz = "UTC"), tz = "UTC")
+}
+
+# -------------------------------------------------------------------------
+#' @export
+as.character.grates_isoweek <- function(x, ...) {
+    format.grates_isoweek(x)
+}
+
+# -------------------------------------------------------------------------
+#' @export
+as.list.grates_isoweek <- function(x, ...) {
+    lapply(unclass(x), `class<-`, class(x))
+}
+
+# -------------------------------------------------------------------------
+#' @export
+as.data.frame.grates_isoweek <- as.data.frame.vector
+
+# -------------------------------------------------------------------------
+#' @export
+min.grates_isoweek <- function(x, ..., na.rm = FALSE) {
+    out <- NextMethod()
+    `class<-`(out, class(x))
+}
+
+# -------------------------------------------------------------------------
+#' @export
+max.grates_isoweek <- function(x, ..., na.rm = FALSE) {
+    out <- NextMethod()
+    `class<-`(out, class(x))
+}
+
+# -------------------------------------------------------------------------
+#' @export
+range.grates_isoweek <- function(x, ..., na.rm = FALSE) {
+    out <- NextMethod()
+    `class<-`(out, class(x))
+}
+
+# -------------------------------------------------------------------------
+#' @export
+Summary.grates_isoweek <- function(..., na.rm = FALSE) {
+    stopf("`%s()` is not supported for <grates_isoweek> objects.", .Generic)
+}
+
+# -------------------------------------------------------------------------
+#' @export
+Math.grates_isoweek <- function(x, ...) {
+    stopf("`%s()` is not supported for <grates_isoweek> objects.", .Generic)
+}
+
+# -------------------------------------------------------------------------
+#' @export
+quantile.grates_isoweek <- function(x, type = 1, ...) {
+    x <- unclass(x)
+    x <- as.integer(quantile(x, type = type, ...))
+    new_isoweek(x)
+}
+
+# -------------------------------------------------------------------------
+#' @export
+Ops.grates_isoweek <- function(e1, e2) {
+    op <- .Generic
+
+    if (op %in% c("==", "!=", "<", ">", "<=", ">=")) {
+        if (inherits(e2, "grates_isoweek")) {
+            return(NextMethod())
+        }
+        stop("Can only compare <grates_isoweek> objects with <grates_isoweek> objects.")
+    }
+
+    switch(
+        op,
+        "+" = {
+            if (missing(e2)) {
+                return(e1)
+            } else if (inherits(e1, "grates_isoweek") && inherits(e2, "grates_isoweek")) {
+                stop("Cannot add <grates_isoweek> objects to each other.")
+            } else if (inherits(e1, "grates_isoweek") && (.is_whole(e2))) {
+                return(.new_isoweek(unclass(e1) + as.integer(e2)))
+            } else if (inherits(e2, "grates_isoweek") && (.is_whole(e1))) {
+                return(.new_isoweek(unclass(e2) + as.integer(e1)))
+            }
+            stop("Can only add integers to <grates_isoweek> objects.")
+        },
+        "-" = {
+            if (missing(e2)) {
+                stop("Cannot negate a <grates_isoweek> object.")
+            } else if (inherits(e2, "grates_isoweek")) {
+                if (inherits(e1, "grates_isoweek")) {
+                    weekdiff <- (unclass(e1) - unclass(e2))
+                    return(as.difftime(weekdiff, units = "weeks"))
+                } else {
+                    stop("Can only subtract from a <grates_isoweek> object, not vice-versa.")
+                }
+            } else if (inherits(e1, "grates_isoweek") && is.integer(e2)) {
+                return(.new_isoweek(unclass(e1) - e2))
+            } else if (inherits(e1, "grates_isoweek") && .is_whole(e2)) {
+                return(.new_isoweek(unclass(e1) - as.integer(e2)))
+            }
+            stop("Can only subtract whole numbers and other <grates_isoweek> objects from <grates_isoweek> objects.") # nolint: line_length_linter.
+        },
+        stopf("%s is not compatible with <grates_isoweek> objects.", op)
+    )
+}
+
+# -------------------------------------------------------------------------
+#' @export
+is.numeric.grates_isoweek <- function(x) {
+    FALSE
+}
+
+
+# ------------------------------------------------------------------------- #
+# ------------------------------------------------------------------------- #
+# -------------------------------- INTERNALS ------------------------------ #
+# ------------------------------------------------------------------------- #
+# ------------------------------------------------------------------------- #
+.new_isoweek <- function(x) {`class<-`(x, "grates_isoweek")}
+
+.isoweek <- function(year, week) {
+    out <- .yearweek(year = year, week = week, firstday = 1L)
+    `class<-`(out, "grates_isoweek")
+}
